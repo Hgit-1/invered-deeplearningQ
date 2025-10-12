@@ -28,11 +28,18 @@ def on_press(key):
 listener = keyboard.Listener(on_press=on_press)
 listener.start()
 
+# 创建保存目录
+save_dir = "daolibai_test1V2"
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+    print(f"创建保存目录: {save_dir}")
+
 # 奖励函数
 rewards = np.array([-abs(i - 180) for i in range(361)]) #！
 
 # Q表初始化
-q_table = np.load("q_table.npy") if os.path.exists("q_table.npy") else np.zeros((361, 15))
+q_table_path = os.path.join(save_dir, "q_table.npy")
+q_table = np.load(q_table_path) if os.path.exists(q_table_path) else np.zeros((361, 15))
 
 # 倒立摆参数
 M = 1.0
@@ -177,19 +184,21 @@ for run in range(10000):
     
     # 每50回合或按键中断时保存
     if (run + 1) % 50 == 0 or stop_flag:
-        np.savetxt(f"pendulum_data_run_{run+1}.csv", datatrans, delimiter=",", 
+        csv_path = os.path.join(save_dir, f"pendulum_data_run_{run+1}.csv")
+        np.savetxt(csv_path, datatrans, delimiter=",", 
                    header="Angle (rad),Angular Velocity (rad/s)", comments="")
-        np.save("q_table.npy", q_table)
-        print(f"\n[保存] 数据已保存: pendulum_data_run_{run+1}.csv")
-        print(f"[保存] Q表已保存: q_table.npy\n")
+        np.save(q_table_path, q_table)
+        print(f"\n[保存] 数据已保存: {csv_path}")
+        print(f"[保存] Q表已保存: {q_table_path}\n")
     
     # 如果检测到按键中断，保存并退出
     if stop_flag:
         # 确保保存当前回合数据
         if (run + 1) % 50 != 0:  # 如果不是50的倍数，额外保存一次
-            np.savetxt(f"pendulum_data_run_{run+1}_interrupted.csv", datatrans, delimiter=",", 
+            csv_interrupted_path = os.path.join(save_dir, f"pendulum_data_run_{run+1}.csv")
+            np.savetxt(csv_interrupted_path, datatrans, delimiter=",", 
                        header="Angle (rad),Angular Velocity (rad/s)", comments="")
-            print(f"[中断保存] 当前回合数据已保存: pendulum_data_run_{run+1}_interrupted.csv")
+            print(f"[中断保存] 当前回合数据已保存: {csv_interrupted_path}")
         break
 
 print("\n" + "="*70)
