@@ -6,10 +6,26 @@ import time
 from pynput import keyboard
 
 # 参数
-epsilon = 1.0
+epsilon_start = 1.0  # 初始探索率
+epsilon_end = 0.01   # 最低安全探索率
+epsilon_decay_episodes = 10000  # 在10000回合时衰减到最低
+
+# 计算epsilon衰减率：epsilon_end = epsilon_start * (decay_rate ^ episodes)
+# decay_rate = (epsilon_end / epsilon_start) ^ (1 / episodes)
+epsilon_decay = (epsilon_end / epsilon_start) ** (1 / epsilon_decay_episodes)
+
+epsilon = epsilon_start
 alpha = 0.02
 gamma = 0.9
 max_steps = 800  # 步数翻倍（原先200，现在800）
+
+print(f"Epsilon衰减设置:")
+print(f"  初始值: {epsilon_start}")
+print(f"  最终值: {epsilon_end}")
+print(f"  衰减回合数: {epsilon_decay_episodes}")
+print(f"  衰减率: {epsilon_decay:.6f}")
+print(f"  验证: 第{epsilon_decay_episodes}回合 ε = {epsilon_start * (epsilon_decay ** epsilon_decay_episodes):.6f}")
+print()
 
 # 按键监听标志
 stop_flag = False
@@ -190,6 +206,9 @@ for run in range(10000):
         np.save(q_table_path, q_table)
         print(f"\n[保存] 数据已保存: {csv_path}")
         print(f"[保存] Q表已保存: {q_table_path}\n")
+    
+    # Epsilon衰减
+    epsilon = max(epsilon_end, epsilon * epsilon_decay)
     
     # 如果检测到按键中断，保存并退出
     if stop_flag:
