@@ -2,11 +2,31 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import fsolve
 import os
+import time
+from pynput import keyboard
 
 # 参数
 epsilon = 1.0
 alpha = 0.02
 gamma = 0.9
+max_steps = 800  # 步数翻倍（原先200，现在800）
+
+# 按键监听标志
+stop_flag = False
+
+def on_press(key):
+    global stop_flag
+    try:
+        if key == keyboard.Key.up:  # 监听上箭头
+            stop_flag = True
+            print("\n[按键检测] 检测到上箭头按压，将在本次结束后停止...")
+            return False  # 停止监听
+    except:
+        pass
+
+# 启动按键监听线程
+listener = keyboard.Listener(on_press=on_press)
+listener.start()
 
 # 奖励函数
 rewards = np.array([-abs(i - 180) for i in range(361)]) #！
@@ -39,14 +59,24 @@ def dynamics(t, s, F):
     xddot, wdot = fsolve(equations, [0, 0], xtol=1e-6, maxfev=10000)
     return [v, xddot, w, wdot]
 
-# 训练 100 回合
-for run in range(100):
+# 训练 2000 回合
+print("="*70)
+print("开始训练 - 按上箭头键可随时停止并保存当前回合数据")
+print("="*70)
+
+for run in range(10000):
+    if stop_flag:
+        print(f"\n[用户中断] 在第 {run+1} 回合前停止训练")
+        break
+    
     state = np.array([0.0, 0.0, 3, 0.0]) 
     datatrans = []
 
     step=0
     total_reward = 0
-    while True: #！
+    start_time = time.time()
+    
+    while step < max_steps:  # 使用步数限制
         # 角度状态离散化：将[-180°,+180°]映射到[0,100]，0°对应索引50 #！
         step += 1
         #angle_deg = state[2] * 180 / np.pi
@@ -64,7 +94,7 @@ for run in range(100):
         F = (current_action - 7) * F_max / 7  # 映射
 
         # 状态更新
-        sol = solve_ivp(lambda t, y: dynamics(t, y, F), [0, 0.02], state, t_eval=[0.02])
+        sol = solve_ivp(lambda t, y: dynamics(t, y, F), [0, 0.005], state, t_eval=[0.005])
         state = sol.y[:, -1]
         
         # 状态边界
@@ -80,7 +110,7 @@ for run in range(100):
         next_state = np.clip(int(state[2]), -30, 30)
         
         # 角度的简单奖励
-        reward = -abs(state[2])-abs(state[3])
+        reward = -abs(state[2]) #-abs(state[3])
         total_reward += reward 
         
         # 位置约束惩罚
@@ -94,15 +124,75 @@ for run in range(100):
 
         if total_reward < -1000:
             break
+        
+        # 检查按键中断
+        if stop_flag:
+            print(f"\n[按键中断] 在第 {run+1} 回合第 {step} 步检测到中断")
+            break
+        
         # Q 学习更新
         max_next_q = np.max(q_table[next_state])
         q_table[current_state, current_action] += alpha * (
             total_reward + gamma * max_next_q - q_table[current_state, current_action]
         )
 
-    # 保存
-    if (run + 1) % 10 == 0:
+    # 计算运行时间
+    elapsed_time = time.time() - start_time
+    
+    # 计算统计信息
+    final_angle = state[2]
+    final_angular_vel = state[3]
+    final_position = state[0]
+    final_velocity = state[1]
+    avg_reward = total_reward / step if step > 0 else 0
+    
+    # 每次都输出详细信息
+    print(f"\n{'='*70}")
+    print(f"回合 {run+1:5d} 完成")
+    print(f"{'-'*70}")
+    print(f"  步数:         {step:4d} / {max_steps} 步")
+    print(f"  运行时间:     {elapsed_time:.3f} 秒")
+    print(f"  累计奖励:     {total_reward:8.2f}")
+    print(f"  平均奖励:     {avg_reward:8.2f}")
+    print(f"  最终角度:     {final_angle:7.2f}°")
+    print(f"  最终角速度:   {final_angular_vel:7.2f} rad/s")
+    print(f"  最终位置:     {final_position:7.2f} m")
+    print(f"  最终速度:     {final_velocity:7.2f} m/s")
+    print(f"  探索率 ε:     {epsilon:.4f}")
+    
+    # 判断终止原因
+    if step >= max_steps:
+        print(f"  终止原因:     达到最大步数 ✓")
+    elif abs(state[0]) == 30:
+        print(f"  终止原因:     位置超限 ✗")
+    elif abs(state[1]) == 10:
+        print(f"  终止原因:     速度超限 ✗")
+    elif total_reward < -1000:
+        print(f"  终止原因:     奖励过低 ✗")
+    elif stop_flag:
+        print(f"  终止原因:     用户中断 ⚠")
+    else:
+        print(f"  终止原因:     其他")
+    print(f"{'='*70}")
+    
+    # 每50回合或按键中断时保存
+    if (run + 1) % 50 == 0 or stop_flag:
         np.savetxt(f"pendulum_data_run_{run+1}.csv", datatrans, delimiter=",", 
                    header="Angle (rad),Angular Velocity (rad/s)", comments="")
         np.save("q_table.npy", q_table)
-        print(f"Run {run+1} completed")
+        print(f"\n[保存] 数据已保存: pendulum_data_run_{run+1}.csv")
+        print(f"[保存] Q表已保存: q_table.npy\n")
+    
+    # 如果检测到按键中断，保存并退出
+    if stop_flag:
+        # 确保保存当前回合数据
+        if (run + 1) % 50 != 0:  # 如果不是50的倍数，额外保存一次
+            np.savetxt(f"pendulum_data_run_{run+1}_interrupted.csv", datatrans, delimiter=",", 
+                       header="Angle (rad),Angular Velocity (rad/s)", comments="")
+            print(f"[中断保存] 当前回合数据已保存: pendulum_data_run_{run+1}_interrupted.csv")
+        break
+
+print("\n" + "="*70)
+print("训练结束")
+print("="*70)
+listener.stop()
