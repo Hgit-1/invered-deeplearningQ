@@ -4,11 +4,17 @@ from scipy.optimize import fsolve
 import os
 import time
 from pynput import keyboard
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# 设置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 # 参数
-epsilon_start = 1.0  # 初始探索率
-epsilon_end = 0.01   # 最低安全探索率
-epsilon_decay_episodes = 10000  # 在10000回合时衰减到最低
+epsilon_start = 1  # 初始探索率
+epsilon_end = 0.01  # 最低安全探索率
+epsilon_decay_episodes = 100  # 在10000回合时衰减到最低
 
 # 计算epsilon衰减率：epsilon_end = epsilon_start * (decay_rate ^ episodes)
 # decay_rate = (epsilon_end / epsilon_start) ^ (1 / episodes)
@@ -45,7 +51,7 @@ listener = keyboard.Listener(on_press=on_press)
 listener.start()
 
 # 创建保存目录
-save_dir = "daolibai_test1V2"
+save_dir = "daolibai_test1V2_fileuse"
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
     print(f"创建保存目录: {save_dir}")
@@ -82,12 +88,20 @@ def dynamics(t, s, F):
     xddot, wdot = fsolve(equations, [0, 0], xtol=1e-6, maxfev=10000)
     return [v, xddot, w, wdot]
 
-# 训练 2000 回合
+# 训练统计数据
+training_stats = {
+    'episodes': [],
+    'rewards_at_100': [],  # 第100步的累计奖励（或最后一步）
+    'epsilon': [],
+    'total_steps': []
+}
+
+# 训练 10000 回合
 print("="*70)
 print("开始训练 - 按上箭头键可随时停止并保存当前回合数据")
 print("="*70)
 
-for run in range(10000):
+for run in range(100):
     if stop_flag:
         print(f"\n[用户中断] 在第 {run+1} 回合前停止训练")
         break
@@ -97,6 +111,7 @@ for run in range(10000):
 
     step=0
     total_reward = 0
+    reward_at_100 = 0  # 记录第100步的奖励
     start_time = time.time()
     
     while step < max_steps:  # 使用步数限制
@@ -134,7 +149,11 @@ for run in range(10000):
         
         # 角度的简单奖励
         reward = -abs(state[2]) #-abs(state[3])
-        total_reward += reward 
+        total_reward += reward
+        
+        # 记录第100步的累计奖励
+        if step == 100:
+            reward_at_100 = total_reward 
         
         # 位置约束惩罚
         if abs(state[0]) == 30:
@@ -161,6 +180,16 @@ for run in range(10000):
 
     # 计算运行时间
     elapsed_time = time.time() - start_time
+    
+    # 如果步数小于100，使用最后一步的奖励
+    if step < 100:
+        reward_at_100 = total_reward
+    
+    # 记录训练统计
+    training_stats['episodes'].append(run + 1)
+    training_stats['rewards_at_100'].append(reward_at_100)
+    training_stats['epsilon'].append(epsilon)
+    training_stats['total_steps'].append(step)
     
     # 计算统计信息
     final_angle = state[2]
@@ -204,8 +233,21 @@ for run in range(10000):
         np.savetxt(csv_path, datatrans, delimiter=",", 
                    header="Angle (rad),Angular Velocity (rad/s)", comments="")
         np.save(q_table_path, q_table)
+        
+        # 保存训练统计
+        stats_path = os.path.join(save_dir, "training_statistics.csv")
+        stats_data = np.column_stack([
+            training_stats['episodes'],
+            training_stats['rewards_at_100'],
+            training_stats['epsilon'],
+            training_stats['total_steps']
+        ])
+        np.savetxt(stats_path, stats_data, delimiter=",",
+                   header="Episode,Reward_at_100,Epsilon,Total_Steps", comments="")
+        
         print(f"\n[保存] 数据已保存: {csv_path}")
-        print(f"[保存] Q表已保存: {q_table_path}\n")
+        print(f"[保存] Q表已保存: {q_table_path}")
+        print(f"[保存] 训练统计已保存: {stats_path}\n")
     
     # Epsilon衰减
     epsilon = max(epsilon_end, epsilon * epsilon_decay)
@@ -218,9 +260,84 @@ for run in range(10000):
             np.savetxt(csv_interrupted_path, datatrans, delimiter=",", 
                        header="Angle (rad),Angular Velocity (rad/s)", comments="")
             print(f"[中断保存] 当前回合数据已保存: {csv_interrupted_path}")
+        
+        # 保存训练统计
+        stats_path = os.path.join(save_dir, "training_statistics.csv")
+        stats_data = np.column_stack([
+            training_stats['episodes'],
+            training_stats['rewards_at_100'],
+            training_stats['epsilon'],
+            training_stats['total_steps']
+        ])
+        np.savetxt(stats_path, stats_data, delimiter=",",
+                   header="Episode,Reward_at_100,Epsilon,Total_Steps", comments="")
+        print(f"[中断保存] 训练统计已保存: {stats_path}")
+        
         break
 
 print("\n" + "="*70)
 print("训练结束")
 print("="*70)
 listener.stop()
+
+# 生成训练统计可视化图表
+if len(training_stats['episodes']) > 0:
+    print("\n生成训练统计图表...")
+    
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10))
+    
+    episodes = training_stats['episodes']
+    
+    # 图1: 第100步奖励值
+    axes[0].plot(episodes, training_stats['rewards_at_100'], 'b-', alpha=0.6, linewidth=1)
+    if len(episodes) >= 10:
+        window = min(50, len(episodes) // 10)
+        moving_avg = np.convolve(training_stats['rewards_at_100'], 
+                                 np.ones(window)/window, mode='valid')
+        axes[0].plot(episodes[window-1:], moving_avg, 'r-', linewidth=2, 
+                    label=f'{window}-episode moving average')
+    axes[0].axhline(y=0, color='k', linestyle='--', alpha=0.3)
+    axes[0].set_xlabel('Episode', fontsize=11)
+    axes[0].set_ylabel('Reward at Step 100', fontsize=11)
+    axes[0].set_title('Training Reward Progress', fontsize=13, fontweight='bold')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # 图2: 探索率衰减
+    axes[1].plot(episodes, training_stats['epsilon'], 'g-', linewidth=2)
+    axes[1].axhline(y=epsilon_end, color='r', linestyle='--', alpha=0.5, 
+                   label=f'Min epsilon = {epsilon_end}')
+    axes[1].set_xlabel('Episode', fontsize=11)
+    axes[1].set_ylabel('Epsilon (Exploration Rate)', fontsize=11)
+    axes[1].set_title('Epsilon Decay', fontsize=13, fontweight='bold')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    # 图3: 每回合总步数
+    axes[2].plot(episodes, training_stats['total_steps'], 'purple', alpha=0.6, linewidth=1)
+    if len(episodes) >= 10:
+        window = min(50, len(episodes) // 10)
+        moving_avg_steps = np.convolve(training_stats['total_steps'], 
+                                       np.ones(window)/window, mode='valid')
+        axes[2].plot(episodes[window-1:], moving_avg_steps, 'orange', linewidth=2,
+                    label=f'{window}-episode moving average')
+    axes[2].axhline(y=max_steps, color='r', linestyle='--', alpha=0.5, 
+                   label=f'Max steps = {max_steps}')
+    axes[2].set_xlabel('Episode', fontsize=11)
+    axes[2].set_ylabel('Total Steps', fontsize=11)
+    axes[2].set_title('Episode Duration', fontsize=13, fontweight='bold')
+    axes[2].legend()
+    axes[2].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # 保存图表
+    plot_path = os.path.join(save_dir, "training_statistics.png")
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f"训练统计图表已保存: {plot_path}")
+    
+    # 显示图表
+    plt.show()
+    print("\n训练统计可视化完成！")
+else:
+    print("\n没有训练数据，跳过可视化")
