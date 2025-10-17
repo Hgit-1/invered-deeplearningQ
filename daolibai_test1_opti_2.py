@@ -13,8 +13,8 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # 参数
 epsilon_start = 1  # 初始探索率
-epsilon_end = 0.01  # 最低安全探索率
-epsilon_decay_episodes = 100  # 在10000回合时衰减到最低
+epsilon_end = 0.3  # 最低安全探索率
+epsilon_decay_episodes = 500  # 在500回合时衰减到最低
 
 # 计算epsilon衰减率：epsilon_end = epsilon_start * (decay_rate ^ episodes)
 # decay_rate = (epsilon_end / epsilon_start) ^ (1 / episodes)
@@ -96,12 +96,12 @@ training_stats = {
     'total_steps': []
 }
 
-# 训练 10000 回合
+# 训练 500 回合
 print("="*70)
 print("开始训练 - 按上箭头键可随时停止并保存当前回合数据")
 print("="*70)
 
-for run in range(100):
+for run in range(500):
     if stop_flag:
         print(f"\n[用户中断] 在第 {run+1} 回合前停止训练")
         break
